@@ -39,8 +39,11 @@ class MASM:
     def add_code(self, code):
         self.batch.append(str(code))
 
-    def add_end(self, name='start'):
-        self.printf(f'end {name}')
+    def add_end(self, entry='start'):
+        """
+        告知程序的入口
+        """
+        self.printf(f'end {entry}')
 
 
 class Data:

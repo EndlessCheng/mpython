@@ -77,9 +77,8 @@ class Compiler(BaseVisitor, BuiltinsMixin):
         self.asm.add_segment_footer('data')
 
         self.asm.add_segment_header('code')
-
-        # init
         self.asm.add_label(masm.Label('start'))
+        # init
         self.asm.add_code(masm.Mov('ax', 'data'))
         self.asm.add_code(masm.Mov('ds', 'ax'))
 
@@ -92,6 +91,7 @@ class Compiler(BaseVisitor, BuiltinsMixin):
                 assert False, str(c)
 
         self.asm.add_segment_footer('code')
+
         self.asm.add_end()
 
     def visit_Module(self, node):
