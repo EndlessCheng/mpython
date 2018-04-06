@@ -9,25 +9,28 @@ class MASM:
         self.printf = partial(print, file=output_file)
         self.batch = []
 
+    def newline(self):
+        self.printf()
+
     def flush(self):
         for s in self.batch:
             self.printf(f"{MASM.TAB}{s}")
         self.batch = []
 
+    def add_assume(self, cs_segment='code', ds_segment='data'):
+        self.printf(f'assume cs:{cs_segment}, ds:{ds_segment}')
+        self.newline()
+
     def add_segment_header(self, name):
-        self.flush()
         self.printf(f'{name} segment')
 
     def add_segment_footer(self, name):
         self.flush()
         self.printf(f'{name} ends')
+        self.newline()
 
     def add_data(self, data):
         self.printf(f"{MASM.TAB}{data}")
-
-    def add_assume(self, ds_segment='data', cs_segment='code'):
-        self.flush()
-        self.printf(f'assume cs:{cs_segment}, ds:{ds_segment}')
 
     def add_label(self, label):
         self.flush()
@@ -37,7 +40,6 @@ class MASM:
         self.batch.append(str(code))
 
     def add_end(self, name='start'):
-        self.flush()
         self.printf(f'end {name}')
 
 
@@ -91,3 +93,14 @@ class Mov(Code):
 class Int(Code):
     def __init__(self, num):
         super().__init__('int', num)
+
+
+# TODO: 栈溢出？
+class Push(Code):
+    def __init__(self, src):
+        super().__init__('push', src)
+
+
+class Pop(Code):
+    def __init__(self, dst):
+        super().__init__('pop', dst)
