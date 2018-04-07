@@ -39,6 +39,9 @@ class BaseVisitor:
     def visit_Str(self, node):
         print(f"Consumed string {node.s}")
 
+    def visit_Pass(self, node):
+        pass
+
 
 class Compiler(BaseVisitor, BuiltinsMixin):
     """
@@ -65,7 +68,7 @@ class Compiler(BaseVisitor, BuiltinsMixin):
         pass
 
     def after_visit(self):
-        self.add_exit()
+        self.exit()
 
     def gen_result(self):
         self.asm.add_assume()
@@ -97,6 +100,9 @@ class Compiler(BaseVisitor, BuiltinsMixin):
     def visit_Module(self, node):
         for stmt in node.body:
             self.visit(stmt)
+
+    def visit_Expr(self, node):
+        self.visit(node.value)
 
     def visit_FunctionDef(self, node):
         assert self._func is None, "nested functions not supported"
@@ -156,11 +162,23 @@ class Compiler(BaseVisitor, BuiltinsMixin):
 
     def visit_Num(self, node):
         n = node.n
-        self.codes.append(masm.Mov('ax', n))
-        self.codes.append(masm.Push('ax'))
+        self.codes.append(masm.Push(n))
 
-    def visit_Expr(self, node):
-        self.visit(node.value)
+    def visit_Str(self, node):
+        s = node.s
+        if len(s) == 1:
+            self.codes.append(masm.Push(ord(s[0])))
+        else:
+            super().visit_Str(node)
+
+    def visit_NameConstant(self, node):
+        value = node.value
+        if value is None or value is False:
+            self.codes.append(masm.Push(0))
+        elif value is True:
+            self.codes.append(masm.Push(1))
+        else:
+            assert False, f"{value} not supported"
 
     def visit_Call(self, node):
         func_name = node.func.id
@@ -174,7 +192,54 @@ class Compiler(BaseVisitor, BuiltinsMixin):
         else:
             ...
 
-    def add_exit(self):
+    def visit_UnaryOp(self, node):
+        assert isinstance(node.op, ast.USub), f"only unary minus is supported, not {type(node.op)}"
+        self.visit(ast.Num(n=0))
+        self.visit(node.operand)
+        self.visit(ast.Sub())
+
+    def visit_BinOp(self, node):
+        self.visit(node.left)
+        self.visit(node.right)
+        self.visit(node.op)
+
+    def simple_bin_op(self, masm_class):
+        self.codes.append(masm.Pop('dx'))  # right
+        self.codes.append(masm.Pop('ax'))  # left
+        self.codes.append(masm_class('ax', 'dx'))  # left = left ? right
+        self.codes.append(masm.Push('ax'))
+
+    def visit_Add(self, node):
+        self.simple_bin_op(masm.Add)
+
+    def visit_Sub(self, node):
+        self.simple_bin_op(masm.Sub)
+
+    def visit_Mult(self, node):
+        self.codes.append(masm.Pop('dx'))  # right
+        self.codes.append(masm.Pop('ax'))  # left
+        self.codes.append(masm.Mul('dx'))  # ax = ax * right
+        self.codes.append(masm.Push('ax'))  # TODO: 取存放高 16 位的 dx
+
+    def visit_BitAnd(self, node):
+        self.simple_bin_op(masm.And)
+
+    def visit_BitOr(self, node):
+        self.simple_bin_op(masm.Or)
+
+    def visit_BitXor(self, node):
+        self.simple_bin_op(masm.Xor)
+
+    def visit_BoolOp(self, node):
+        self.visit(node.values[0])
+        for value in node.values[1:]:
+            self.visit(value)
+            self.visit(node.op)
+
+    visit_And = visit_BitAnd
+    visit_Or = visit_BitOr
+
+    def exit(self):
         self.codes.append(masm.Mov('ah', 0x4c))
         self.codes.append(masm.Int(0x21))
 

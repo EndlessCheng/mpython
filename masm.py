@@ -88,22 +88,198 @@ class Code:
         return self.ins
 
 
+# -----------------------------------------------
+# 数据传送指令
+#
+
 class Mov(Code):
-    def __init__(self, reg, data):
-        super().__init__('mov', reg, data)
+    """
+    传送
 
+    mem, reg  9 + EA
+    reg, mem  8 + EA
+    reg, reg  2
 
-class Int(Code):
-    def __init__(self, num):
-        super().__init__('int', num)
+    reg, imm  4
+    mem, imm
+
+    seg, reg
+    seg, mem
+    mem, seg
+    reg, seg
+
+    mem, acc
+    acc, mem
+    """
+
+    def __init__(self, dst, src):
+        super().__init__('mov', dst, src)
 
 
 # TODO: 栈溢出？
 class Push(Code):
+    """
+    进栈
+
+    reg  11
+    seg
+    mem
+    """
+
     def __init__(self, src):
         super().__init__('push', src)
 
 
 class Pop(Code):
+    """
+    出栈
+
+    reg  8
+    seg
+    mem
+    """
+
     def __init__(self, dst):
         super().__init__('pop', dst)
+
+
+# -----------------------------------------------
+# 算数运算指令
+#
+
+class Add(Code):
+    """
+    加法
+
+    mem, reg
+    reg, mem
+    reg, reg  3
+    reg, imm
+    mem, imm
+    acc, imm
+    """
+
+    def __init__(self, dst, src):
+        super().__init__('add', dst, src)
+
+
+class Sub(Code):
+    """
+    减法
+
+    mem, reg
+    reg, mem
+    reg, reg  3
+    reg, imm
+    mem, imm
+    acc, imm
+    """
+
+    def __init__(self, dst, src):
+        super().__init__('sub', dst, src)
+
+
+class Mul(Code):
+    """
+    无符号数乘法
+
+    8 位 reg   70 ~ 77
+    8 位 mem
+    16 位 reg  118 ~ 133
+    16 位 mem
+    """
+
+    def __init__(self, src):
+        super().__init__('mul', src)
+
+
+# -----------------------------------------------
+# 逻辑运算指令
+#
+
+class And(Code):
+    """
+    逻辑与
+
+    mem, reg
+    reg, mem
+    reg, reg  3
+    reg, imm
+    mem, imm
+    acc, imm
+    """
+
+    def __init__(self, dst, src):
+        super().__init__('and', dst, src)
+
+
+class Or(Code):
+    """
+    逻辑或
+
+    mem, reg
+    reg, mem
+    reg, reg  3
+    reg, imm
+    mem, imm
+    acc, imm
+    """
+
+    def __init__(self, dst, src):
+        super().__init__('or', dst, src)
+
+
+class Xor(Code):
+    """
+    逻辑异或
+
+    mem, reg
+    reg, mem
+    reg, reg  3
+    reg, imm
+    mem, imm
+    acc, imm
+    """
+
+    def __init__(self, dst, src):
+        super().__init__('xor', dst, src)
+
+
+# -----------------------------------------------
+# 控制与转移指令
+#
+
+class Int(Code):
+    """
+    中断调用
+
+    n != 3  51
+    n == 3  52
+    """
+
+    def __init__(self, n):
+        super().__init__('int', n)
+
+
+# -----------------------------------------------
+# 处理机控制指令
+#
+
+class Nop(Code):
+    """
+    无操作
+
+    3
+    """
+
+    def __init__(self):
+        super().__init__('nop')
+
+
+class Hlt(Code):
+    """
+    停机
+    """
+
+    def __init__(self):
+        super().__init__('hlt')
