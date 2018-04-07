@@ -193,6 +193,20 @@ class Mul(Code):
         super().__init__('mul', src)
 
 
+class Div(Code):
+    """
+    无符号数除法
+
+    8 位 reg   101 ~ 112
+    8 位 mem
+    16 位 reg  164 ~ 184
+    16 位 mem
+    """
+
+    def __init__(self, src):
+        super().__init__('div', src)
+
+
 # -----------------------------------------------
 # 逻辑运算指令
 #

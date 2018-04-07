@@ -101,9 +101,6 @@ class Compiler(BaseVisitor, BuiltinsMixin):
         for stmt in node.body:
             self.visit(stmt)
 
-    def visit_Expr(self, node):
-        self.visit(node.value)
-
     def visit_FunctionDef(self, node):
         assert self._func is None, "nested functions not supported"
 
@@ -180,6 +177,14 @@ class Compiler(BaseVisitor, BuiltinsMixin):
         else:
             assert False, f"{value} not supported"
 
+    def visit_Name(self, node):
+        offset = self.local_offset(node.id)
+        self.codes.append(masm.Push(f'[bp+{offset}]'))
+
+    def visit_Expr(self, node):
+        self.visit(node.value)
+        # TODO: self.codes.append(masm.Pop('ax'))
+
     def visit_Call(self, node):
         func_name = node.func.id
         args = node.args
@@ -203,6 +208,16 @@ class Compiler(BaseVisitor, BuiltinsMixin):
         self.visit(node.right)
         self.visit(node.op)
 
+    def visit_AugAssign(self, node):
+        # +=, -=, ...
+        py_name = node.target
+        self.visit(py_name)
+        self.visit(node.value)
+        self.visit(node.op)
+
+        offset = self.local_offset(py_name.id)
+        self.codes.append(masm.Pop(f'[bp+{offset}]'))
+
     def simple_bin_op(self, masm_class):
         self.codes.append(masm.Pop('dx'))  # right
         self.codes.append(masm.Pop('ax'))  # left
@@ -220,6 +235,18 @@ class Compiler(BaseVisitor, BuiltinsMixin):
         self.codes.append(masm.Pop('ax'))  # left
         self.codes.append(masm.Mul('dx'))  # ax = ax * right
         self.codes.append(masm.Push('ax'))  # TODO: 取存放高 16 位的 dx
+
+    def compile_divide(self, result_reg):
+        self.codes.append(masm.Pop('dx'))  # right
+        self.codes.append(masm.Pop('ax'))  # left
+        self.codes.append(masm.Div('dx'))  # ax, dx = ax // dx, ax % dx
+        self.codes.append(masm.Push(result_reg))
+
+    def visit_FloorDiv(self, node):
+        self.compile_divide('ax')
+
+    def visit_Mod(self, node):
+        self.compile_divide('dx')
 
     def visit_BitAnd(self, node):
         self.simple_bin_op(masm.And)
