@@ -88,6 +88,7 @@ class Code:
     def _str(self):
         ins = self.op
         if self.args:
+            # 需要注意的是，立即数不能以字母开头。为方便起见，就不转换成 16 进制了
             new_args = map(str, self.args)
             ins += ' ' + ', '.join(new_args)
         return ins
@@ -121,6 +122,10 @@ class Mov(Code):
     """
 
     def __init__(self, dst, src):
+        if isinstance(src, str) and src[0] == '[':
+            assert src[-1] == ']'
+            # mov dst, [imm] 的含义与 mov dst, imm 相同。为方便起见，在 [] 前显式地加上 ds:
+            src = 'ds:' + src
         super().__init__('mov', dst, src)
 
 
