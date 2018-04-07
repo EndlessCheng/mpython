@@ -80,14 +80,15 @@ class Compiler(BaseVisitor, BuiltinsMixin):
         self.asm.add_segment_footer('data')
 
         self.asm.add_segment_header('code')
-        self.asm.add_label(masm.Label('start'))
+        self.asm.add_label('start')
         # Init ds reg
         self.asm.add_code(masm.Mov('ax', 'data'))
         self.asm.add_code(masm.Mov('ds', 'ax'))
         # TODO: Init ss reg
 
         for c in self.codes:
-            if isinstance(c, masm.Label):
+            if isinstance(c, str):
+                # TODO: 重构 label
                 self.asm.add_label(c)
             elif isinstance(c, masm.Code):
                 self.asm.add_code(c)
@@ -114,6 +115,7 @@ class Compiler(BaseVisitor, BuiltinsMixin):
 
         self._func = node.name
         self._locals = [py_arg.arg for py_arg in py_args.args]
+        self._label_num = 0
 
         # Find names of additional locals assigned in this function
         locals_visitor = LocalsVisitor()
@@ -213,6 +215,7 @@ class Compiler(BaseVisitor, BuiltinsMixin):
 
     def visit_AugAssign(self, node):
         # +=, -=, ...
+        # TODO: inc
         py_name = node.target
         self.visit(py_name)
         self.visit(node.value)
@@ -221,10 +224,10 @@ class Compiler(BaseVisitor, BuiltinsMixin):
         offset = self.local_offset(py_name.id)
         self.codes.append(masm.Pop(f'[bp+{offset}]'))
 
-    def simple_bin_op(self, masm_class):
+    def simple_bin_op(self, bin_op_class):
         self.codes.append(masm.Pop('dx'))  # right
         self.codes.append(masm.Pop('ax'))  # left
-        self.codes.append(masm_class('ax', 'dx'))  # left = left ? right
+        self.codes.append(bin_op_class('ax', 'dx'))  # left = left ? right
         self.codes.append(masm.Push('ax'))
 
     def visit_Add(self, node):
@@ -269,6 +272,74 @@ class Compiler(BaseVisitor, BuiltinsMixin):
     visit_And = visit_BitAnd
     visit_Or = visit_BitOr
 
+    def gen_label(self, slug=''):
+        func = self._func or '_global'
+        label = f'{func}_{self._label_num}'
+        if slug:
+            slug = slug.replace(' ', '_')
+            label += f'_{slug}'
+        self._label_num += 1
+        return label
+
+    def visit_Compare(self, node):
+        assert len(node.ops) == 1, "only single comparisons supported"
+        self.visit(node.left)
+        self.visit(node.comparators[0])
+        self.visit(node.ops[0])
+
+    def compile_comparison(self, cond_jump_class, slug):
+        """
+        False 则 push 1, True 则 push 0
+        """
+        self.codes.append(masm.Sub('bx', 'bx'))  # bx = 0
+        self.codes.append(masm.Pop('dx'))  # right
+        self.codes.append(masm.Pop('ax'))  # left
+        self.codes.append(masm.Cmp('ax', 'dx'))  # left - right
+        label = self.gen_label(slug)
+        self.codes.append(cond_jump_class(label))
+        self.codes.append(masm.Inc('bx'))  # False
+        self.codes.append(label)
+        self.codes.append(masm.Push('bx'))  # True
+
+    def visit_Eq(self, node):
+        self.compile_comparison(masm.Je, 'equal')
+
+    def visit_NotEq(self, node):
+        self.compile_comparison(masm.Jne, 'not_equal')
+
+    def visit_Lt(self, node):
+        self.compile_comparison(masm.Jb, 'less')
+
+    def visit_LtE(self, node):
+        self.compile_comparison(masm.Jbe, 'less_or_equal')
+
+    def visit_Gt(self, node):
+        self.compile_comparison(masm.Ja, 'greater')
+
+    def visit_GtE(self, node):
+        self.compile_comparison(masm.Jae, 'greater_or_equal')
+
+    def visit_If(self, node):
+        self.visit(node.test)  # ast.Compare
+        self.codes.append(masm.Pop('ax'))
+        self.codes.append(masm.Cmp('ax', 1))
+        label_else = self.gen_label('else')
+        label_end = self.gen_label('end')
+        self.codes.append(masm.Je(label_else))  # False
+
+        for stmt in node.body:
+            self.visit(stmt)
+        if node.orelse:
+            # TODO: 仔细决定 distance ?
+            self.codes.append(masm.Jmp(masm.Jmp.SHORT, label_end))
+
+        self.codes.append(label_else)
+        for stmt in node.orelse:
+            self.visit(stmt)
+
+        if node.orelse:
+            self.codes.append(label_end)
+
     def visit_For(self, node):
         ...
 
@@ -282,7 +353,7 @@ def main():
     parser.add_argument('filename', help="filename to compile")
     args = parser.parse_args()
 
-    name = 'calculator'
+    name = 'jmp'
     args.filename = 'tests' + os.sep + f'{name}.py'
 
     with open(args.filename, encoding='utf-8') as f:
@@ -291,6 +362,7 @@ def main():
 
     curpath = os.path.abspath(os.curdir)
     output = os.path.join(curpath, 'tests', f'{name}.asm')
+    print(f"Output to {output}")
     with open(output, 'w') as f:
         compiler = Compiler(output_file=f)
         compiler.compile(node)

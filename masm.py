@@ -34,7 +34,7 @@ class MASM:
 
     def add_label(self, label):
         self.flush()
-        self.printf(f'{label.name}:')
+        self.printf(f'{label}:')
 
     def add_code(self, code):
         self.batch.append(str(code))
@@ -67,11 +67,6 @@ class Data:
 
     def __str__(self):
         return self.ins
-
-
-class Label:
-    def __init__(self, name):
-        self.name = name
 
 
 class Code:
@@ -124,7 +119,7 @@ class Mov(Code):
     def __init__(self, dst, src):
         if isinstance(src, str) and src[0] == '[':
             assert src[-1] == ']'
-            # mov dst, [imm] 的含义与 mov dst, imm 相同。为方便起见，在 [] 前显式地加上 ds:
+            # mov dst, [imm] 的含义与 mov dst, imm 相同。为方便起见，在 [] 前显式地加上段前缀 ds:
             src = 'ds:' + src
         super().__init__('mov', dst, src)
 
@@ -176,6 +171,18 @@ class Add(Code):
         super().__init__('add', dst, src)
 
 
+class Inc(Code):
+    """
+    加 1
+
+    reg  2 ~ 3
+    mem
+    """
+
+    def __init__(self, opr):
+        super().__init__('inc', opr)
+
+
 class Sub(Code):
     """
     减法
@@ -190,6 +197,19 @@ class Sub(Code):
 
     def __init__(self, dst, src):
         super().__init__('sub', dst, src)
+
+
+class Cmp(Code):
+    """
+    比较
+
+    reg, reg 3
+    reg, imm 4
+    mem, imm
+    """
+
+    def __init__(self, opr1, opr2):
+        super().__init__('cmp', opr1, opr2)
 
 
 class Mul(Code):
@@ -275,6 +295,122 @@ class Xor(Code):
 # -----------------------------------------------
 # 控制与转移指令
 #
+
+class Jmp(Code):
+    """
+    无条件转移
+
+    reg
+    mem
+    """
+    SHORT = 'short'
+    NEAR_PTR = 'near ptr'
+    WORD_PTR = 'word ptr'
+    FAR_PTR = 'far ptr'
+    DWORD_PTR = 'dword ptr'
+
+    _DISTANCE_LIST = [SHORT, NEAR_PTR, WORD_PTR, FAR_PTR, DWORD_PTR]
+
+    def __init__(self, distance, opr):
+        assert distance.lower() in Jmp._DISTANCE_LIST, f"wrong distance {distance}"
+        super().__init__('jmp', f'{distance} {opr}')
+
+
+class Jz(Code):
+    """
+    结果为 0（或相等）则转移
+
+    ZF = 1 则转移到 opr
+
+    16/4
+    """
+
+    def __init__(self, opr):
+        super().__init__('jz', opr)
+
+
+Je = Jz
+
+
+class Jnz(Code):
+    """
+    结果不为 0（或不相等）则转移
+
+    ZF = 0 则转移到 opr
+
+    16/4
+    """
+
+    def __init__(self, opr):
+        super().__init__('jnz', opr)
+
+
+Jne = Jnz
+
+
+class Jb(Code):
+    """
+    低于则转移
+
+    CF = 1 且 ZF = 0 则转移到 opr
+
+    16/4
+    """
+
+    def __init__(self, opr):
+        super().__init__('jb', opr)
+
+
+Jnae = Jb
+
+
+class Jbe(Code):
+    """
+    低于等于则转移
+
+    CF = 1 或 ZF = 1 则转移到 opr
+
+    16/4
+    """
+
+    def __init__(self, opr):
+        super().__init__('jbe', opr)
+
+
+Jna = Jbe
+
+
+class Ja(Code):
+    """
+    高于则转移
+
+    CF = 0 且 ZF = 0 则转移到 opr
+
+    16/4
+    """
+
+    def __init__(self, opr):
+        super().__init__('ja', opr)
+
+
+Jnbe = Ja
+
+
+class Jae(Code):
+    """
+    高于等于则转移
+
+    CF = 0 或 ZF = 1 则转移到 opr
+
+    16/4
+    """
+
+    def __init__(self, opr):
+        super().__init__('jae', opr)
+
+
+Jnb = Jae
+
 
 class Int(Code):
     """
