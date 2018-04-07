@@ -52,6 +52,10 @@ class Data:
         self.op = op
         self.args = args or ('?',)
 
+        for arg in self.args:
+            if isinstance(arg, int):
+                assert arg <= 0xff, "data arg must <= 0xff"
+
         self.ins = self._str()
 
     def _str(self):
@@ -72,6 +76,10 @@ class Label:
 
 class Code:
     def __init__(self, op, *args):
+        for arg in args:
+            if isinstance(arg, int):
+                assert arg <= 0xffff, "code arg must <= 0xffff"
+
         self.op = op
         self.args = args
 
@@ -80,7 +88,7 @@ class Code:
     def _str(self):
         ins = self.op
         if self.args:
-            new_args = [a if isinstance(a, str) else f'{a:02x}h' for a in self.args]
+            new_args = map(str, self.args)
             ins += ' ' + ', '.join(new_args)
         return ins
 

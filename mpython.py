@@ -81,9 +81,10 @@ class Compiler(BaseVisitor, BuiltinsMixin):
 
         self.asm.add_segment_header('code')
         self.asm.add_label(masm.Label('start'))
-        # init
+        # Init ds reg
         self.asm.add_code(masm.Mov('ax', 'data'))
         self.asm.add_code(masm.Mov('ds', 'ax'))
+        # TODO: Init ss reg
 
         for c in self.codes:
             if isinstance(c, masm.Label):
@@ -159,21 +160,23 @@ class Compiler(BaseVisitor, BuiltinsMixin):
 
     def visit_Num(self, node):
         n = node.n
-        self.codes.append(masm.Push(n))
+        self.codes.append(masm.Mov('ax', n))
+        self.codes.append(masm.Push('ax'))
 
     def visit_Str(self, node):
+        # TODO: malloc?
         s = node.s
         if len(s) == 1:
-            self.codes.append(masm.Push(ord(s[0])))
+            self.visit_Num(ast.Num(n=ord(s[0])))
         else:
             super().visit_Str(node)
 
     def visit_NameConstant(self, node):
         value = node.value
         if value is None or value is False:
-            self.codes.append(masm.Push(0))
+            self.visit_Num(ast.Num(n=0))
         elif value is True:
-            self.codes.append(masm.Push(1))
+            self.visit_Num(ast.Num(n=1))
         else:
             assert False, f"{value} not supported"
 
@@ -199,9 +202,9 @@ class Compiler(BaseVisitor, BuiltinsMixin):
 
     def visit_UnaryOp(self, node):
         assert isinstance(node.op, ast.USub), f"only unary minus is supported, not {type(node.op)}"
-        self.visit(ast.Num(n=0))
+        self.visit_Num(ast.Num(n=0))
         self.visit(node.operand)
-        self.visit(ast.Sub())
+        self.visit_Sub(ast.Sub())
 
     def visit_BinOp(self, node):
         self.visit(node.left)
@@ -266,6 +269,9 @@ class Compiler(BaseVisitor, BuiltinsMixin):
     visit_And = visit_BitAnd
     visit_Or = visit_BitOr
 
+    def visit_For(self, node):
+        ...
+
     def exit(self):
         self.codes.append(masm.Mov('ah', 0x4c))
         self.codes.append(masm.Int(0x21))
@@ -276,7 +282,7 @@ def main():
     parser.add_argument('filename', help="filename to compile")
     args = parser.parse_args()
 
-    name = 'putc'
+    name = 'calculator'
     args.filename = 'tests' + os.sep + f'{name}.py'
 
     with open(args.filename, encoding='utf-8') as f:
