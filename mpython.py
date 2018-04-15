@@ -28,18 +28,26 @@ class LocalsVisitor(ast.NodeVisitor):
         target = node.targets[0]
         self.add(target.id)
 
+    def visit_For(self, node):
+        self.add(node.target.id)
+        for stmt in node.body:
+            self.visit(stmt)
+
 
 class BaseVisitor:
-    def visit(self, node):
+    def visit(self, node, *args, **kwargs):
         method = 'visit_' + node.__class__.__name__
         visitor = getattr(self, method, None)
         assert visitor is not None, f"{method} not supported, node {ast.dump(node)}"
-        return visitor(node)
+        return visitor(node, *args, **kwargs)
 
     def visit_Str(self, node):
         print(f"Consumed string {node.s}")
 
-    def visit_Pass(self, node):
+    # def visit_Pass(self, node):
+    #     pass
+
+    def visit_Ellipsis(self, node):
         pass
 
 
@@ -113,7 +121,10 @@ class Compiler(BaseVisitor, BuiltinsMixin):
 
         # TODO: kwargs with defaults
 
-        self._func = node.name
+        self._func = node.name  # For gen label name
+        self._loop_labels = []  # See method visit_Continue
+        self._break_labels = []  # See method visit_Break
+
         self._locals = [py_arg.arg for py_arg in py_args.args]
         self._label_num = 0
 
@@ -131,7 +142,7 @@ class Compiler(BaseVisitor, BuiltinsMixin):
         if node.name == 'main':
             for stmt in node.body:
                 self.visit(stmt)
-        else:
+        else:  # TODO: builtin
             ...
 
         self._func = None
@@ -169,16 +180,17 @@ class Compiler(BaseVisitor, BuiltinsMixin):
         # TODO: malloc?
         s = node.s
         if len(s) == 1:
-            self.visit_Num(ast.Num(n=ord(s[0])))
+            self.visit(ast.Num(n=ord(s[0])))
         else:
             super().visit_Str(node)
 
     def visit_NameConstant(self, node):
+        # Handle None, False and True
         value = node.value
         if value is None or value is False:
-            self.visit_Num(ast.Num(n=0))
+            self.visit(ast.Num(n=0))
         elif value is True:
-            self.visit_Num(ast.Num(n=1))
+            self.visit(ast.Num(n=1))
         else:
             assert False, f"{value} not supported"
 
@@ -195,6 +207,7 @@ class Compiler(BaseVisitor, BuiltinsMixin):
         args = node.args
         kwargs = node.keywords
 
+        # TODO: builtin
         if func_name == 'print':
             self._print(args, kwargs)
         elif func_name == 'putchar':
@@ -202,11 +215,12 @@ class Compiler(BaseVisitor, BuiltinsMixin):
         else:
             ...
 
+    # TODO: ast.Not, ast.Invert
     def visit_UnaryOp(self, node):
         assert isinstance(node.op, ast.USub), f"only unary minus is supported, not {type(node.op)}"
-        self.visit_Num(ast.Num(n=0))
+        self.visit(ast.Num(n=0))
         self.visit(node.operand)
-        self.visit_Sub(ast.Sub())
+        self.visit(ast.Sub())
 
     def visit_BinOp(self, node):
         self.visit(node.left)
@@ -215,7 +229,7 @@ class Compiler(BaseVisitor, BuiltinsMixin):
 
     def visit_AugAssign(self, node):
         # +=, -=, ...
-        # TODO: inc
+        # TODO: inc for += 1
         py_name = node.target
         self.visit(py_name)
         self.visit(node.value)
@@ -224,44 +238,64 @@ class Compiler(BaseVisitor, BuiltinsMixin):
         offset = self.local_offset(py_name.id)
         self.codes.append(masm.Pop(f'[bp+{offset}]'))
 
-    def simple_bin_op(self, bin_op_class):
+    def _simple_bin_op(self, bin_ins_class):
         self.codes.append(masm.Pop('dx'))  # right
         self.codes.append(masm.Pop('ax'))  # left
-        self.codes.append(bin_op_class('ax', 'dx'))  # left = left ? right
+        self.codes.append(bin_ins_class('ax', 'dx'))
         self.codes.append(masm.Push('ax'))
 
     def visit_Add(self, node):
-        self.simple_bin_op(masm.Add)
+        self._simple_bin_op(masm.Add)
 
     def visit_Sub(self, node):
-        self.simple_bin_op(masm.Sub)
+        self._simple_bin_op(masm.Sub)
 
     def visit_Mult(self, node):
         self.codes.append(masm.Pop('dx'))  # right
         self.codes.append(masm.Pop('ax'))  # left
-        self.codes.append(masm.Mul('dx'))  # ax = ax * right
+        self.codes.append(masm.Mul('dx'))  # ax = ax * dx
         self.codes.append(masm.Push('ax'))  # TODO: 取存放高 16 位的 dx
 
-    def compile_divide(self, result_reg):
+    def _compile_divide(self, result_reg):
         self.codes.append(masm.Pop('dx'))  # right
         self.codes.append(masm.Pop('ax'))  # left
         self.codes.append(masm.Div('dx'))  # ax, dx = ax // dx, ax % dx
         self.codes.append(masm.Push(result_reg))
 
     def visit_FloorDiv(self, node):
-        self.compile_divide('ax')
+        self._compile_divide('ax')
 
     def visit_Mod(self, node):
-        self.compile_divide('dx')
+        self._compile_divide('dx')
 
     def visit_BitAnd(self, node):
-        self.simple_bin_op(masm.And)
+        self._simple_bin_op(masm.And)
+
+    visit_And = visit_BitAnd
 
     def visit_BitOr(self, node):
-        self.simple_bin_op(masm.Or)
+        self._simple_bin_op(masm.Or)
 
     def visit_BitXor(self, node):
-        self.simple_bin_op(masm.Xor)
+        self._simple_bin_op(masm.Xor)
+
+    visit_Or = visit_BitOr
+
+    def _simple_shift_op(self, shift_ins_class):
+        self.codes.append(masm.Mov('ax', 'cx'))  # save cx
+
+        self.codes.append(masm.Pop('cx'))  # cnt
+        self.codes.append(masm.Pop('dx'))  # opr
+        self.codes.append(shift_ins_class('dx', 'cl'))
+        self.codes.append(masm.Push('dx'))
+
+        self.codes.append(masm.Mov('cx', 'ax'))  # restore cx
+
+    def visit_LShift(self, node):
+        self._simple_shift_op(masm.Sal)
+
+    def visit_RShift(self, node):
+        self._simple_shift_op(masm.Sar)
 
     def visit_BoolOp(self, node):
         self.visit(node.values[0])
@@ -269,12 +303,9 @@ class Compiler(BaseVisitor, BuiltinsMixin):
             self.visit(value)
             self.visit(node.op)
 
-    visit_And = visit_BitAnd
-    visit_Or = visit_BitOr
-
     def gen_label(self, slug=''):
         func = self._func or '_global'
-        label = f'{func}_{self._label_num}'
+        label = f'_{func}_{self._label_num}'
         if slug:
             slug = slug.replace(' ', '_')
             label += f'_{slug}'
@@ -282,16 +313,18 @@ class Compiler(BaseVisitor, BuiltinsMixin):
         return label
 
     def visit_Compare(self, node):
+        # TODO: multi-compare
         assert len(node.ops) == 1, "only single comparisons supported"
         self.visit(node.left)
         self.visit(node.comparators[0])
         self.visit(node.ops[0])
 
-    def compile_comparison(self, cond_jump_class, slug):
+    def _compile_comparison(self, cond_jump_class, slug):
         """
-        False 则 push 1, True 则 push 0
+        False: push 1
+        True: push 0
         """
-        self.codes.append(masm.Sub('bx', 'bx'))  # bx = 0
+        self.codes.append(masm.Xor('bx', 'bx'))  # bx = 0
         self.codes.append(masm.Pop('dx'))  # right
         self.codes.append(masm.Pop('ax'))  # left
         self.codes.append(masm.Cmp('ax', 'dx'))  # left - right
@@ -302,36 +335,37 @@ class Compiler(BaseVisitor, BuiltinsMixin):
         self.codes.append(masm.Push('bx'))  # True
 
     def visit_Eq(self, node):
-        self.compile_comparison(masm.Je, 'equal')
+        self._compile_comparison(masm.Je, 'equal')
 
     def visit_NotEq(self, node):
-        self.compile_comparison(masm.Jne, 'not_equal')
+        self._compile_comparison(masm.Jne, 'not_equal')
 
     def visit_Lt(self, node):
-        self.compile_comparison(masm.Jb, 'less')
+        self._compile_comparison(masm.Jb, 'less')
 
     def visit_LtE(self, node):
-        self.compile_comparison(masm.Jbe, 'less_or_equal')
+        self._compile_comparison(masm.Jbe, 'less_or_equal')
 
     def visit_Gt(self, node):
-        self.compile_comparison(masm.Ja, 'greater')
+        self._compile_comparison(masm.Ja, 'greater')
 
     def visit_GtE(self, node):
-        self.compile_comparison(masm.Jae, 'greater_or_equal')
+        self._compile_comparison(masm.Jae, 'greater_or_equal')
 
     def visit_If(self, node):
+        label_else = self.gen_label('else')
+        label_end = self.gen_label('end')
+
         self.visit(node.test)  # ast.Compare
         self.codes.append(masm.Pop('ax'))
         self.codes.append(masm.Cmp('ax', 1))
-        label_else = self.gen_label('else')
-        label_end = self.gen_label('end')
         self.codes.append(masm.Je(label_else))  # False
 
         for stmt in node.body:
             self.visit(stmt)
         if node.orelse:
-            # TODO: 仔细决定 distance ?
-            self.codes.append(masm.Jmp(masm.Jmp.SHORT, label_end))
+            # if 执行完后跳到 if-else 串的末尾
+            self.codes.append(masm.Jmp(label_end))
 
         self.codes.append(label_else)
         for stmt in node.orelse:
@@ -340,11 +374,84 @@ class Compiler(BaseVisitor, BuiltinsMixin):
         if node.orelse:
             self.codes.append(label_end)
 
+    def visit_While(self, node, incr=None):
+        assert not node.orelse, "while-else not supported"
+
+        while_label = self.gen_label('while')
+        self._loop_labels.append(while_label)
+        break_label = self.gen_label('break')
+        self._break_labels.append(break_label)
+        if incr:
+            incr_label = self.gen_label('incr')
+            self._loop_labels.append(incr_label)
+
+        self.codes.append(while_label)
+        self.visit(node.test)
+        self.codes.append(masm.Pop('ax'))
+        self.codes.append(masm.Cmp('ax', 1))
+        self.codes.append(masm.Je(break_label))  # False
+
+        for statement in node.body:
+            self.visit(statement)
+        if incr:
+            self.codes.append(incr_label)
+            self.visit(incr)
+        self.codes.append(masm.Jmp(while_label))
+
+        self.codes.append(break_label)
+
+        self._break_labels.pop()
+        self._loop_labels.pop()
+        if incr:
+            self._loop_labels.pop()
+
+    def visit_Break(self, node):
+        self.codes.append(masm.Jmp(self._break_labels[-1]))
+
+    def visit_Continue(self, node):
+        self.codes.append(masm.Jmp(self._loop_labels[-1]))
+
+    def _parse_range_args(self, range_args):
+        if len(range_args) == 1:
+            start = ast.Num(n=0)
+            stop = range_args[0]
+            step = ast.Num(n=1)
+        elif len(range_args) == 2:
+            start, stop = range_args
+            step = ast.Num(n=1)
+        else:
+            start, stop, step = range_args
+            # TODO: self.visit(step)
+            if isinstance(step, ast.UnaryOp) and isinstance(step.op, ast.USub) and isinstance(step.operand, ast.Num):
+                # Handle negative step
+                step = ast.Num(n=-step.operand.n)
+            assert isinstance(step, ast.Num) and step.n != 0, "range() step must be a nonzero integer constant"
+        return start, stop, step
+
     def visit_For(self, node):
-        ...
+        """
+        Turn `for i in range()` loop into a while loop:
+        >>>  i = start
+        >>>  while i < stop:  # or >
+        >>>      node.body
+        >>>      i += step  # 考虑到 continue 的情况，略有差别，见 visit_While
+        """
+        assert not node.orelse, "for-else not supported"
+
+        py_call = node.iter
+        assert isinstance(py_call, ast.Call) and py_call.func.id == 'range', "for can only be used with range()"
+        start, stop, step = self._parse_range_args(py_call.args)
+        py_name = node.target
+
+        init = ast.Assign(targets=[py_name], value=start)
+        cond = ast.Compare(left=node.target, ops=[ast.Lt() if step.n > 0 else ast.Gt()], comparators=[stop])
+        incr = ast.AugAssign(target=py_name, op=ast.Add(), value=step)
+
+        self.visit(init)
+        self.visit(ast.While(test=cond, body=node.body, orelse=[]), incr=incr)
 
     def exit(self):
-        self.codes.append(masm.Mov('ah', 0x4c))
+        self.codes.append(masm.Mov('ax', 0x4c00))  # return al, which is 0
         self.codes.append(masm.Int(0x21))
 
 
