@@ -276,6 +276,18 @@ class Or(Code):
         super().__init__('or', dst, src)
 
 
+class Not(Code):
+    """
+    逻辑非
+
+    reg  3
+    mem
+    """
+
+    def __init__(self, opr):
+        super().__init__('not', opr)
+
+
 class Xor(Code):
     """
     逻辑异或
@@ -290,6 +302,50 @@ class Xor(Code):
 
     def __init__(self, dst, src):
         super().__init__('xor', dst, src)
+
+
+class _Shift(Code):
+    def __init__(self, shift_cmd, opr, cnt):
+        self.shift_cmd = shift_cmd
+        self.opr = opr
+        self.cnt = cnt
+        super().__init__(shift_cmd, opr, cnt)
+
+    def gen_codes(self):
+        assert isinstance(self.cnt, int), "cnt should be int"
+        if self.cnt == 1:
+            return [self]
+        mov = Mov('cl', self.cnt)
+        shift_cmd = Code(self.shift_cmd, self.opr, 'cl')
+        return [mov, shift_cmd]
+
+
+class Sal(_Shift):
+    """
+    算术左移
+
+    1  reg  2
+       mem
+    CL reg  8
+       mem
+    """
+
+    def __init__(self, opr, cnt):
+        super().__init__('sal', opr, cnt)
+
+
+class Sar(_Shift):
+    """
+    算术右移
+
+    1  reg  2
+       mem
+    CL reg  8
+       mem
+    """
+
+    def __init__(self, opr, cnt):
+        super().__init__('sar', opr, cnt)
 
 
 # -----------------------------------------------
@@ -311,9 +367,14 @@ class Jmp(Code):
 
     _DISTANCE_LIST = [SHORT, NEAR_PTR, WORD_PTR, FAR_PTR, DWORD_PTR]
 
-    def __init__(self, distance, opr):
-        assert distance.lower() in Jmp._DISTANCE_LIST, f"wrong distance {distance}"
-        super().__init__('jmp', f'{distance} {opr}')
+    def __init__(self, *args):
+        assert 1 <= len(args) <= 2
+        distance = args[0] if len(args) == 2 else ''
+        opr = args[1] if len(args) == 2 else args[0]
+        assert not distance or distance.lower() in Jmp._DISTANCE_LIST, f"wrong distance {distance}"
+        if distance:
+            distance += ' '
+        super().__init__('jmp', f'{distance}{opr}')
 
 
 class Jz(Code):
@@ -410,6 +471,36 @@ class Jae(Code):
 
 
 Jnb = Jae
+
+
+class Call(Code):
+    """
+    子程序调用
+
+    reg
+    mem
+    """
+
+    def __init__(self, dst):
+        super().__init__('call', dst)
+
+
+class Ret(Code):
+    """
+    子程序返回
+
+    近转移，返回到 call 的下一行命令
+    有 exp 时栈指针加 exp
+
+    无 exp  16
+    有 exp  20
+    """
+
+    def __init__(self, exp=None):
+        if exp is None:
+            super().__init__('ret')
+        else:
+            super().__init__('ret', exp)
 
 
 class Int(Code):
