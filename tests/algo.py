@@ -9,5 +9,6 @@ def gcd(x, y):
 
 
 def main():
-    g = gcd(42, 70)
-    putchar(g + 97)
+    g1 = gcd(42, 70)
+    g2 = gcd(5, 3)
+    putchar(g1 + g2 + 97)
