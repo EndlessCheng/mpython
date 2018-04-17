@@ -7,6 +7,7 @@ import sys
 
 import masm
 from _builtins import BuiltinsMixin
+from writer import MasmWriter
 
 MAIN_FUNC_NAME = 'main'
 
@@ -62,8 +63,8 @@ class Compiler(BaseVisitor, BuiltinsMixin):
     The main Python AST -> MASM compiler.
     """
 
-    def __init__(self, output_file=sys.stdout):
-        self.asm = masm.MASM(output_file)
+    def __init__(self, output_file=sys.stdout, optimize=True):
+        self.asm = MasmWriter(output_file, optimize)
 
         self.data = []
         self.codes = []
@@ -93,18 +94,17 @@ class Compiler(BaseVisitor, BuiltinsMixin):
         self.asm.add_segment_footer('data')
 
         self.asm.add_segment_header('code')
-        self.asm.add_label('start')
+        self.asm.add_label(masm.Label('start'))
+
         # Init ds reg
         self.asm.add_code(masm.Mov('ax', 'data'))
         self.asm.add_code(masm.Mov('ds', 'ax'))
         # TODO: Init ss reg
 
-        # TODO: global ?
         self.asm.add_code(masm.Jmp(MAIN_FUNC_NAME))
 
         for c in self.codes:
-            if isinstance(c, str):
-                # TODO: 重构 label
+            if isinstance(c, masm.Label):
                 self.asm.add_label(c)
             elif isinstance(c, masm.Code):
                 self.asm.add_code(c)
@@ -132,7 +132,7 @@ class Compiler(BaseVisitor, BuiltinsMixin):
         # TODO: kwargs with defaults
 
         self._func = node.name  # For gen label name
-        func_label = node.name
+        func_label = masm.Label(node.name)
         self.codes.append(func_label)
 
         self._label_num = 0
@@ -157,21 +157,21 @@ class Compiler(BaseVisitor, BuiltinsMixin):
         # self.codes.append('')
         self._func = None
 
-    def _malloc_stack(self, n):
+    def _extend_stack(self, n):
         # 增大栈
-        self.codes.append(masm.Sub('sp', 2 * n))
+        if n > 0:
+            self.codes.append(masm.Sub('sp', 2 * n))
 
-    def _free_stack(self, n):
+    def _rewind_stack(self, n):
         # 回滚栈
-        self.codes.append(masm.Add('sp', 2 * n))
+        if n > 0:
+            self.codes.append(masm.Add('sp', 2 * n))
 
-    def compile_prologue(self, num_locals=0):
+    def compile_prologue(self, num_locals):
         # Use bp for a stack frame pointer
         self.codes.append(masm.Push('bp'))  # 保存调用函数前的 bp
         self.codes.append(masm.Mov('bp', 'sp'))
-
-        if num_locals > 0:
-            self._malloc_stack(num_locals)
+        self._extend_stack(num_locals)
 
     def compile_epilogue(self):
         # TODO: Lea
@@ -214,7 +214,7 @@ class Compiler(BaseVisitor, BuiltinsMixin):
                 self.visit(py_arg)
             self.codes.append(masm.Call(func_name))
             if args:
-                self._free_stack(len(args))
+                self._rewind_stack(len(args))
 
             # Push ax whatever (see method visit_Return)
             self.codes.append(masm.Push('ax'))
@@ -365,7 +365,7 @@ class Compiler(BaseVisitor, BuiltinsMixin):
             slug = slug.replace(' ', '_')
             label += f'_{slug}'
         self._label_num += 1
-        return label
+        return masm.Label(label)
 
     def visit_Compare(self, node):
         # TODO: multi-compare
@@ -376,18 +376,18 @@ class Compiler(BaseVisitor, BuiltinsMixin):
 
     def _compile_comparison(self, cond_jump_class, slug):
         """
-        False: push 1
-        True: push 0
+        False: push 0
+        True: push 1
         """
-        self.codes.append(masm.Xor('bx', 'bx'))
+        self.codes.append(masm.Mov('bx', 1))
         self.codes.append(masm.Pop('dx'))  # right
         self.codes.append(masm.Pop('ax'))  # left
         self.codes.append(masm.Cmp('ax', 'dx'))  # left - right
-        label = self.gen_label(slug)
-        self.codes.append(cond_jump_class(label))
-        self.codes.append(masm.Inc('bx'))  # False
-        self.codes.append(label)
-        self.codes.append(masm.Push('bx'))  # True
+        label_true = self.gen_label(slug)
+        self.codes.append(cond_jump_class(label_true))
+        self.codes.append(masm.Dec('bx'))
+        self.codes.append(label_true)
+        self.codes.append(masm.Push('bx'))
 
     def visit_Eq(self, node):
         self._compile_comparison(masm.Je, 'equal')
@@ -413,8 +413,8 @@ class Compiler(BaseVisitor, BuiltinsMixin):
 
         self.visit(node.test)  # ast.Compare
         self.codes.append(masm.Pop('bx'))
-        self.codes.append(masm.Cmp('bx', 1))
-        self.codes.append(masm.Je(label_else))  # False
+        self.codes.append(masm.Cmp('bx', 0))
+        self.codes.append(masm.Jz(label_else))  # False
 
         for stmt in node.body:
             self.visit(stmt)
@@ -443,8 +443,8 @@ class Compiler(BaseVisitor, BuiltinsMixin):
         self.codes.append(while_label)
         self.visit(node.test)
         self.codes.append(masm.Pop('bx'))
-        self.codes.append(masm.Cmp('bx', 1))
-        self.codes.append(masm.Je(break_label))  # False
+        self.codes.append(masm.Cmp('bx', 0))
+        self.codes.append(masm.Jz(break_label))  # False
 
         for statement in node.body:
             self.visit(statement)
@@ -529,7 +529,7 @@ def main():
     output = os.path.join(curpath, 'tests', f'{name}.asm')
     print(f"Output to {output}")
     with open(output, 'w') as f:
-        compiler = Compiler(output_file=f)
+        compiler = Compiler(output_file=f, optimize=True)
         compiler.compile(node)
 
     if platform.system() == 'Windows':
