@@ -216,7 +216,7 @@ class Compiler(BaseVisitor, BuiltinsMixin):
             if args:
                 self._free_stack(len(args))
 
-            # 无论函数是否有返回值，都把它压到栈中
+            # Push ax whatever (see method visit_Return)
             self.codes.append(masm.Push('ax'))
 
     # ---------------------------------------------------------------------------------
@@ -246,7 +246,7 @@ class Compiler(BaseVisitor, BuiltinsMixin):
     def visit_Num(self, node):
         n = node.n
         self.codes.append(masm.Mov('ax', n))
-        self.codes.append(masm.Push('ax'))  # 压栈
+        self.codes.append(masm.Push('ax'))
 
     def visit_Str(self, node):
         # TODO: malloc?
@@ -268,7 +268,7 @@ class Compiler(BaseVisitor, BuiltinsMixin):
 
     def visit_Name(self, node):
         offset = self._local_offset(node.id)
-        self.codes.append(masm.Push(self._gen_var_mem(offset)))  # 压栈
+        self.codes.append(masm.Push(self._gen_var_mem(offset)))
 
     # TODO: ast.Not, ast.Invert
     def visit_UnaryOp(self, node):
@@ -297,7 +297,7 @@ class Compiler(BaseVisitor, BuiltinsMixin):
         self.codes.append(masm.Pop('dx'))  # right
         self.codes.append(masm.Pop('ax'))  # left
         self.codes.append(bin_ins_class('ax', 'dx'))
-        self.codes.append(masm.Push('ax'))  # 压栈
+        self.codes.append(masm.Push('ax'))
 
     def visit_Add(self, node):
         self._simple_bin_op(masm.Add)
@@ -309,7 +309,7 @@ class Compiler(BaseVisitor, BuiltinsMixin):
         self.codes.append(masm.Pop('dx'))  # right
         self.codes.append(masm.Pop('ax'))  # left
         self.codes.append(masm.Mul('dx'))  # ax = ax * dx
-        self.codes.append(masm.Push('ax'))  # 压栈
+        self.codes.append(masm.Push('ax'))
         # TODO: 取存放高 16 位的 dx
 
     def _compile_divide(self, result_reg):
@@ -317,7 +317,7 @@ class Compiler(BaseVisitor, BuiltinsMixin):
         self.codes.append(masm.Xor('dx', 'dx'))
         self.codes.append(masm.Pop('ax'))  # left
         self.codes.append(masm.Div('bx'))  # ax, dx = ax // bx, ax % bx
-        self.codes.append(masm.Push(result_reg))  # 压栈
+        self.codes.append(masm.Push(result_reg))
 
     def visit_FloorDiv(self, node):
         self._compile_divide('ax')
@@ -342,7 +342,7 @@ class Compiler(BaseVisitor, BuiltinsMixin):
         self.codes.append(masm.Pop('cx'))  # cnt
         self.codes.append(masm.Pop('dx'))  # opr
         self.codes.append(shift_ins_class('dx', 'cl'))
-        self.codes.append(masm.Push('dx'))  # 压栈
+        self.codes.append(masm.Push('dx'))
 
     def visit_LShift(self, node):
         self._simple_shift_op(masm.Sal)
@@ -379,7 +379,7 @@ class Compiler(BaseVisitor, BuiltinsMixin):
         False: push 1
         True: push 0
         """
-        self.codes.append(masm.Xor('bx', 'bx'))  # bx = 0
+        self.codes.append(masm.Xor('bx', 'bx'))
         self.codes.append(masm.Pop('dx'))  # right
         self.codes.append(masm.Pop('ax'))  # left
         self.codes.append(masm.Cmp('ax', 'dx'))  # left - right
