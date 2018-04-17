@@ -5,11 +5,9 @@ import masm
 
 class BuiltinsMixin:
     def _putchar(self, expr):
-        if isinstance(expr, ast.Name):
-            offset = self._local_offset(expr.id)
-            self.codes.append(masm.Mov('ax', self._gen_var_mem(offset)))
-        else:
-            assert False, f"{type(expr)} not supported"
+        self.visit(expr)
+        self.codes.append(masm.Pop('ax'))
+
         self.codes.append(masm.Mov('dl', 'al'))
         self.codes.append(masm.Mov('ah', 2))
         self.codes.append(masm.Int(0x21))
