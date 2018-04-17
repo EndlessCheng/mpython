@@ -157,21 +157,21 @@ class Compiler(BaseVisitor, BuiltinsMixin):
         # self.codes.append('')
         self._func = None
 
-    def _malloc_stack(self, n):
+    def _extend_stack(self, n):
         # 增大栈
-        self.codes.append(masm.Sub('sp', 2 * n))
+        if n > 0:
+            self.codes.append(masm.Sub('sp', 2 * n))
 
-    def _free_stack(self, n):
+    def _rewind_stack(self, n):
         # 回滚栈
-        self.codes.append(masm.Add('sp', 2 * n))
+        if n > 0:
+            self.codes.append(masm.Add('sp', 2 * n))
 
-    def compile_prologue(self, num_locals=0):
+    def compile_prologue(self, num_locals):
         # Use bp for a stack frame pointer
         self.codes.append(masm.Push('bp'))  # 保存调用函数前的 bp
         self.codes.append(masm.Mov('bp', 'sp'))
-
-        if num_locals > 0:
-            self._malloc_stack(num_locals)
+        self._extend_stack(num_locals)
 
     def compile_epilogue(self):
         # TODO: Lea
@@ -214,7 +214,7 @@ class Compiler(BaseVisitor, BuiltinsMixin):
                 self.visit(py_arg)
             self.codes.append(masm.Call(func_name))
             if args:
-                self._free_stack(len(args))
+                self._rewind_stack(len(args))
 
             # Push ax whatever (see method visit_Return)
             self.codes.append(masm.Push('ax'))
