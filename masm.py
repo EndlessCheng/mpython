@@ -180,23 +180,23 @@ class Cmp(Code):
         super().__init__('cmp', opr1, opr2)
 
 
-class Mul(Code):
+class Imul(Code):
     """
-    无符号数乘法
+    带符号数乘法
 
-    8 位 reg   70 ~ 77
+    8 位 reg   80 ~ 98
     8 位 mem
-    16 位 reg  118 ~ 133
+    16 位 reg  128 ~ 154
     16 位 mem
     """
 
     def __init__(self, src):
-        super().__init__('mul', src)
+        super().__init__('imul', src)
 
 
-class Div(Code):
+class Idiv(Code):
     """
-    无符号数除法
+    带符号数除法
 
     8 位 reg   101 ~ 112
     8 位 mem
@@ -205,7 +205,7 @@ class Div(Code):
     """
 
     def __init__(self, src):
-        super().__init__('div', src)
+        super().__init__('idiv', src)
 
 
 # -----------------------------------------------

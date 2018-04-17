@@ -308,7 +308,7 @@ class Compiler(BaseVisitor, BuiltinsMixin):
     def visit_Mult(self, node):
         self.codes.append(masm.Pop('dx'))  # right
         self.codes.append(masm.Pop('ax'))  # left
-        self.codes.append(masm.Mul('dx'))  # ax = ax * dx
+        self.codes.append(masm.Imul('dx'))  # ax = ax * dx
         self.codes.append(masm.Push('ax'))
         # TODO: 取存放高 16 位的 dx
 
@@ -316,7 +316,7 @@ class Compiler(BaseVisitor, BuiltinsMixin):
         self.codes.append(masm.Pop('bx'))  # right
         self.codes.append(masm.Xor('dx', 'dx'))
         self.codes.append(masm.Pop('ax'))  # left
-        self.codes.append(masm.Div('bx'))  # ax, dx = ax // bx, ax % bx
+        self.codes.append(masm.Idiv('bx'))  # ax, dx = ax // bx, ax % bx
         self.codes.append(masm.Push(result_reg))
 
     def visit_FloorDiv(self, node):
@@ -518,8 +518,9 @@ def main():
     parser.add_argument('filename', help="filename to compile")
     args = parser.parse_args()
 
-    name = 'algo'
+    name = 'jmp'
     args.filename = 'tests' + os.sep + f'{name}.py'
+    optimize = True
 
     with open(args.filename, encoding='utf-8') as f:
         source = f.read()
@@ -529,7 +530,7 @@ def main():
     output = os.path.join(curpath, 'tests', f'{name}.asm')
     print(f"Output to {output}")
     with open(output, 'w') as f:
-        compiler = Compiler(output_file=f, optimize=True)
+        compiler = Compiler(output_file=f, optimize=optimize)
         compiler.compile(node)
 
     if platform.system() == 'Windows':

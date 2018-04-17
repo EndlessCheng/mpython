@@ -1,7 +1,7 @@
 from functools import partial
 import sys
 
-from optimize import optimize_pushes_pops
+from optimize import optimize_batch
 
 
 class MasmWriter:
@@ -18,7 +18,8 @@ class MasmWriter:
 
     def flush(self):
         if self.optimize:
-            self.batch = optimize_pushes_pops(self.batch)
+            self.batch = optimize_batch(self.batch)
+
         for s in self.batch:
             self.printf(f"{MasmWriter.TAB}{s}")
         self.batch = []
