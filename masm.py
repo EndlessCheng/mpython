@@ -473,6 +473,36 @@ class Jae(Code):
 Jnb = Jae
 
 
+class Call(Code):
+    """
+    子程序调用
+
+    reg
+    mem
+    """
+
+    def __init__(self, dst):
+        super().__init__('call', dst)
+
+
+class Ret(Code):
+    """
+    子程序返回
+
+    近转移，返回到 call 的下一行命令
+    有 exp 时栈指针加 exp
+
+    无 exp  16
+    有 exp  20
+    """
+
+    def __init__(self, exp=None):
+        if exp is None:
+            super().__init__('ret')
+        else:
+            super().__init__('ret', exp)
+
+
 class Int(Code):
     """
     中断调用

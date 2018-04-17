@@ -8,6 +8,8 @@ import sys
 import masm
 from _builtins import BuiltinsMixin
 
+MAIN_FUNC_NAME = 'main'
+
 
 class LocalsVisitor(ast.NodeVisitor):
     """
@@ -15,21 +17,25 @@ class LocalsVisitor(ast.NodeVisitor):
     (so we can allocate the right amount of stack space for them).
     """
 
-    def __init__(self):
-        self.local_names = []
+    def __init__(self, node):
+        self._local_names = set()
+        self.node = node
 
-    def add(self, name):
-        if name not in self.local_names:
-            self.local_names.append(name)
+    def collect(self):
+        self.visit(self.node)
+        return self._local_names
+
+    def _add(self, name):
+        self._local_names.add(name)
 
     def visit_Assign(self, node):
         assert len(node.targets) == 1, "can only assign one variable at a time"
         # self.visit(node.value)
         target = node.targets[0]
-        self.add(target.id)
+        self._add(target.id)
 
     def visit_For(self, node):
-        self.add(node.target.id)
+        self._add(node.target.id)
         for stmt in node.body:
             self.visit(stmt)
 
@@ -63,7 +69,6 @@ class Compiler(BaseVisitor, BuiltinsMixin):
         self.codes = []
 
         self._func = None
-        self._locals = None
 
     def compile(self, node):
         self.before_visit()
@@ -76,7 +81,7 @@ class Compiler(BaseVisitor, BuiltinsMixin):
         pass
 
     def after_visit(self):
-        self.exit()
+        pass
 
     def gen_result(self):
         self.asm.add_assume()
@@ -94,6 +99,9 @@ class Compiler(BaseVisitor, BuiltinsMixin):
         self.asm.add_code(masm.Mov('ds', 'ax'))
         # TODO: Init ss reg
 
+        # TODO: global ?
+        self.asm.add_code(masm.Jmp(MAIN_FUNC_NAME))
+
         for c in self.codes:
             if isinstance(c, str):
                 # TODO: 重构 label
@@ -106,6 +114,8 @@ class Compiler(BaseVisitor, BuiltinsMixin):
         self.asm.add_segment_footer('code')
 
         self.asm.add_end()
+
+    # ---------------------------------------------------------------------------------
 
     def visit_Module(self, node):
         for stmt in node.body:
@@ -122,44 +132,108 @@ class Compiler(BaseVisitor, BuiltinsMixin):
         # TODO: kwargs with defaults
 
         self._func = node.name  # For gen label name
+        func_label = node.name
+        self.codes.append(func_label)
+
+        self._label_num = 0
         self._loop_labels = []  # See method visit_Continue
         self._break_labels = []  # See method visit_Break
 
-        self._locals = [py_arg.arg for py_arg in py_args.args]
-        self._label_num = 0
+        self._func_args = [py_arg.arg for py_arg in py_args.args]
+        self._locals = list(LocalsVisitor(node).collect() - set(self._func_args))
 
-        # Find names of additional locals assigned in this function
-        locals_visitor = LocalsVisitor()
-        locals_visitor.visit(node)
-        for name in locals_visitor.local_names:
-            if name not in self._locals:
-                self._locals.append(name)
-
+        print(self._func_args)
         print(self._locals)
 
-        self.malloc_locals(len(self._locals) - len(py_args.args))
+        # Also see method visit_Call
+        self.compile_prologue(len(self._locals))
 
-        if node.name == 'main':
-            for stmt in node.body:
-                self.visit(stmt)
-        else:  # TODO: builtin
-            ...
+        for stmt in node.body:
+            self.visit(stmt)
+        if not isinstance(node.body[-1], ast.Return):
+            # 手动加上 return
+            self.visit(ast.Return(value=None))
 
+        # TODO: if not main
+        self.compile_epilogue(len(self._locals))
+
+        # self.codes.append('')
         self._func = None
 
-    def malloc_locals(self, num_extra_locals):
-        """
-        占位，塞了一堆垃圾数据进去
-        """
-        for _ in range(num_extra_locals):
-            self.codes.append(masm.Push('ax'))
+    def _malloc_stack(self, n):
+        # 增大栈
+        self.codes.append(masm.Sub('sp', 2 * n))
+
+    def _free_stack(self, n):
+        # 回滚栈
+        self.codes.append(masm.Add('sp', 2 * n))
+
+    def compile_prologue(self, num_extra_locals=0):
         # Use bp for a stack frame pointer
-        self.codes.append(masm.Push('bp'))
+        self.codes.append(masm.Push('bp'))  # 保存调用函数前的 bp
         self.codes.append(masm.Mov('bp', 'sp'))
 
-    def local_offset(self, var_name):
-        index = self._locals.index(var_name)
-        return (len(self._locals) - index) * 2
+        if num_extra_locals > 0:
+            self._malloc_stack(num_extra_locals)
+
+    def compile_epilogue(self, num_extra_locals=0):
+        # TODO: Lea
+        self.codes.append(masm.Mov('sp', 'bp'))
+        self.codes.append(masm.Pop('bp'))  # 复原成上层函数的 bp
+        self.codes.append(masm.Ret())
+
+    def visit_Return(self, node):
+        # TODO: multi-return
+        value = node.value
+        assert not isinstance(value, ast.Tuple), "return multi values not supported"
+
+        if value:
+            self.visit(value)
+
+        if self._func == MAIN_FUNC_NAME:
+            self.compile_exit(value.n if value else 0)
+        else:
+            if value:
+                # Save return value to ax (see method visit_Call)
+                self.codes.append(masm.Pop('ax'))
+
+    def visit_Expr(self, node):
+        self.visit(node.value)
+
+    def visit_Call(self, node):
+        func_name = node.func.id
+        args = node.args
+        kwargs = node.keywords
+
+        # TODO: builtin
+        if func_name == 'print':
+            self._print(args, kwargs)
+        elif func_name == 'putchar':
+            self._putchar(args[0])
+        else:
+            # 倒序压栈，便于检索
+            for py_arg in reversed(args):
+                self.visit(py_arg)
+            self.codes.append(masm.Call(func_name))
+            if args:
+                self._free_stack(len(args))
+
+            # 无论函数是否有返回值，都把它压到栈中
+            self.codes.append(masm.Push('ax'))
+
+    # ---------------------------------------------------------------------------------
+
+    def _local_offset(self, var_name):
+        if var_name in self._func_args:
+            index = self._func_args.index(var_name) + 2
+        elif var_name in self._locals:
+            index = -(self._locals.index(var_name) + 1)
+        else:
+            assert False, f"can't find {var_name} in {self._func}"
+        return 2 * index
+
+    def _gen_var_mem(self, offset):
+        return f'[bp{offset:+d}]'
 
     def visit_Assign(self, node):
         assert len(node.targets) == 1, "can only assign one variable at a time"
@@ -168,8 +242,8 @@ class Compiler(BaseVisitor, BuiltinsMixin):
         self.visit(node.value)
 
         self.codes.append(masm.Pop('ax'))
-        offset = self.local_offset(py_name.id)
-        self.codes.append(masm.Mov(f'[bp+{offset}]', 'ax'))
+        offset = self._local_offset(py_name.id)
+        self.codes.append(masm.Mov(self._gen_var_mem(offset), 'ax'))
 
     def visit_Num(self, node):
         n = node.n
@@ -195,25 +269,8 @@ class Compiler(BaseVisitor, BuiltinsMixin):
             assert False, f"{value} not supported"
 
     def visit_Name(self, node):
-        offset = self.local_offset(node.id)
-        self.codes.append(masm.Push(f'[bp+{offset}]'))
-
-    def visit_Expr(self, node):
-        self.visit(node.value)
-        # TODO: self.codes.append(masm.Pop('ax'))
-
-    def visit_Call(self, node):
-        func_name = node.func.id
-        args = node.args
-        kwargs = node.keywords
-
-        # TODO: builtin
-        if func_name == 'print':
-            self._print(args, kwargs)
-        elif func_name == 'putchar':
-            self._putchar(args[0])
-        else:
-            ...
+        offset = self._local_offset(node.id)
+        self.codes.append(masm.Push(self._gen_var_mem(offset)))
 
     # TODO: ast.Not, ast.Invert
     def visit_UnaryOp(self, node):
@@ -235,8 +292,8 @@ class Compiler(BaseVisitor, BuiltinsMixin):
         self.visit(node.value)
         self.visit(node.op)
 
-        offset = self.local_offset(py_name.id)
-        self.codes.append(masm.Pop(f'[bp+{offset}]'))
+        offset = self._local_offset(py_name.id)
+        self.codes.append(masm.Pop(self._gen_var_mem(offset)))
 
     def _simple_bin_op(self, bin_ins_class):
         self.codes.append(masm.Pop('dx'))  # right
@@ -302,6 +359,8 @@ class Compiler(BaseVisitor, BuiltinsMixin):
         for value in node.values[1:]:
             self.visit(value)
             self.visit(node.op)
+
+    # ---------------------------------------------------------------------------------
 
     def gen_label(self, slug=''):
         func = self._func or '_global'
@@ -450,8 +509,11 @@ class Compiler(BaseVisitor, BuiltinsMixin):
         self.visit(init)
         self.visit(ast.While(test=cond, body=node.body, orelse=[]), incr=incr)
 
-    def exit(self):
-        self.codes.append(masm.Mov('ax', 0x4c00))  # return al, which is 0
+    # ---------------------------------------------------------------------------------
+
+    def compile_exit(self, return_code):
+        assert -128 <= return_code <= 127
+        self.codes.append(masm.Mov('ax', 0x4c00 + return_code))  # return al
         self.codes.append(masm.Int(0x21))
 
 
