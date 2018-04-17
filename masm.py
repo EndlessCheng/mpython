@@ -199,6 +199,18 @@ class Sub(Code):
         super().__init__('sub', dst, src)
 
 
+class Dec(Code):
+    """
+    减 1
+
+    reg  2 ~ 3
+    mem
+    """
+
+    def __init__(self, opr):
+        super().__init__('dec', opr)
+
+
 class Cmp(Code):
     """
     比较

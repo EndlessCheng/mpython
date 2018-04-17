@@ -376,18 +376,18 @@ class Compiler(BaseVisitor, BuiltinsMixin):
 
     def _compile_comparison(self, cond_jump_class, slug):
         """
-        False: push 1
-        True: push 0
+        False: push 0
+        True: push 1
         """
-        self.codes.append(masm.Xor('bx', 'bx'))
+        self.codes.append(masm.Mov('bx', 1))
         self.codes.append(masm.Pop('dx'))  # right
         self.codes.append(masm.Pop('ax'))  # left
         self.codes.append(masm.Cmp('ax', 'dx'))  # left - right
-        label = self.gen_label(slug)
-        self.codes.append(cond_jump_class(label))
-        self.codes.append(masm.Inc('bx'))  # False
-        self.codes.append(label)
-        self.codes.append(masm.Push('bx'))  # True
+        label_true = self.gen_label(slug)
+        self.codes.append(cond_jump_class(label_true))
+        self.codes.append(masm.Dec('bx'))
+        self.codes.append(label_true)
+        self.codes.append(masm.Push('bx'))
 
     def visit_Eq(self, node):
         self._compile_comparison(masm.Je, 'equal')
@@ -413,8 +413,8 @@ class Compiler(BaseVisitor, BuiltinsMixin):
 
         self.visit(node.test)  # ast.Compare
         self.codes.append(masm.Pop('bx'))
-        self.codes.append(masm.Cmp('bx', 1))
-        self.codes.append(masm.Je(label_else))  # False
+        self.codes.append(masm.Cmp('bx', 0))
+        self.codes.append(masm.Jz(label_else))  # False
 
         for stmt in node.body:
             self.visit(stmt)
@@ -443,8 +443,8 @@ class Compiler(BaseVisitor, BuiltinsMixin):
         self.codes.append(while_label)
         self.visit(node.test)
         self.codes.append(masm.Pop('bx'))
-        self.codes.append(masm.Cmp('bx', 1))
-        self.codes.append(masm.Je(break_label))  # False
+        self.codes.append(masm.Cmp('bx', 0))
+        self.codes.append(masm.Jz(break_label))  # False
 
         for statement in node.body:
             self.visit(statement)
