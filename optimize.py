@@ -46,8 +46,8 @@ def optimize_pushes_pops(codes):
         pops = 0
 
     # This loop actually finds the sequences
-    for code in codes:
-        op = code.op
+    for ins in codes:
+        op = ins.op
         if state == _STATE_DEFAULT:
             if op == 'push':
                 state = _STATE_PUSH
@@ -75,8 +75,44 @@ def optimize_pushes_pops(codes):
                     reset()
         else:
             assert False, f"bad state: {state}"
-        optimized.append(code)
+        optimized.append(ins)
     if state == _STATE_POP:
         combine()
 
     return optimized
+
+
+def optimize_single_ins(ins):
+    if isinstance(ins, masm.Mov):
+        if ins.args[1] == 0:
+            return masm.Xor(ins.args[0], ins.args[0])
+    elif isinstance(ins, masm.Add):
+        if ins.args[1] == 1:
+            return masm.Inc(ins.args[0])
+        if ins.args[1] == 0:
+            return None
+        if ins.args[1] == -1:
+            return masm.Dec(ins.args[0])
+    elif isinstance(ins, masm.Sub):
+        if ins.args[1] == 1:
+            return masm.Dec(ins.args[0])
+        if ins.args[1] == 0:
+            return None
+        if ins.args[1] == -1:
+            return masm.Inc(ins.args[0])
+    elif isinstance(ins, masm.Imul):
+        ...  # handle 0, 1; 2, 4, 8, 16
+    return ins
+
+
+def optimize_single_ins_of_batch(batch):
+    for ins in batch:
+        optimized_ins = optimize_single_ins(ins)
+        if optimized_ins:
+            yield optimized_ins
+
+
+def optimize_batch(batch):
+    batch = optimize_pushes_pops(batch)
+    batch = list(optimize_single_ins_of_batch(batch))
+    return batch
